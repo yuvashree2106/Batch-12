@@ -1,0 +1,177 @@
+# multi_disease_prediction_system.py
+
+import pandas as pd
+import numpy as np
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+import joblib
+import os
+import matplotlib.pyplot as plt   # 📊 NEW — for visualization
+
+# ======= 1️⃣ Generate synthetic training data =======
+def generate_synthetic_data(n_samples=1000):
+    X, _ = make_classification(n_samples=n_samples, n_features=8, 
+                                n_informative=6, n_redundant=0, 
+                                n_classes=2, random_state=42)
+
+    _, y_diabetes = make_classification(n_samples=n_samples, n_features=2,
+                                         n_informative=2, n_redundant=0,
+                                         n_classes=2, random_state=1)
+
+    _, y_heart = make_classification(n_samples=n_samples, n_features=2,
+                                      n_informative=2, n_redundant=0,
+                                      n_classes=2, random_state=2)
+
+    df = pd.DataFrame(X, columns=[
+        'age', 'gender', 'blood_pressure', 'cholesterol',
+        'glucose_level', 'bmi', 'chest_pain', 'family_history_diabetes'
+    ])
+
+    df['name'] = ['Patient_' + str(i) for i in range(n_samples)]
+    df['diabetes_present'] = y_diabetes
+    df['heart_disease_present'] = y_heart
+
+    cols = ['name'] + [col for col in df.columns if col != 'name']
+    df = df[cols]
+
+    return df
+
+# ======= 2️⃣ Train models =======
+def train_models(df):
+    X = df.drop(['name', 'diabetes_present', 'heart_disease_present'], axis=1)
+
+    # Diabetes Model
+    y_diabetes = df['diabetes_present']
+    X_train, X_test, y_train, y_test = train_test_split(X, y_diabetes, test_size=0.2, random_state=42)
+    model_diabetes = RandomForestClassifier(n_estimators=100, random_state=42)
+    model_diabetes.fit(X_train, y_train)
+    acc_diabetes = model_diabetes.score(X_test, y_test)
+    joblib.dump(model_diabetes, 'diabetes_model.pkl')
+
+    # Heart Disease Model
+    y_heart = df['heart_disease_present']
+    X_train, X_test, y_train, y_test = train_test_split(X, y_heart, test_size=0.2, random_state=42)
+    model_heart = RandomForestClassifier(n_estimators=100, random_state=42)
+    model_heart.fit(X_train, y_train)
+    acc_heart = model_heart.score(X_test, y_test)
+    joblib.dump(model_heart, 'heart_disease_model.pkl')
+
+    print(f"✅ Diabetes model accuracy: {acc_diabetes:.2f}")
+    print(f"✅ Heart disease model accuracy: {acc_heart:.2f}")
+    print("✅ Models saved as 'diabetes_model.pkl' and 'heart_disease_model.pkl'")
+
+# ======= 3️⃣ Collect patient input =======
+def get_patient_input():
+    print("\n🩺 Enter patient details:")
+    data = []
+    name = input("Patient Name: ").strip()
+    data.append(name)
+    data.append(int(input("Age (in years): ")))
+    data.append(int(input("Gender (1 = Male, 0 = Female): ")))
+    data.append(int(input("Blood Pressure (in mmHg): ")))
+    data.append(int(input("Cholesterol (in mg/dL): ")))
+    data.append(int(input("Glucose Level (in mg/dL): ")))
+    data.append(float(input("BMI (Body Mass Index): ")))
+    data.append(int(input("Chest Pain (1 = Yes, 0 = No): ")))
+    data.append(int(input("Family History of Diabetes (1 = Yes, 0 = No): ")))
+    return data
+
+def save_patient_data(patient_data, filename='patient_input_data.csv'):
+    columns = [
+        'name',
+        'age', 'gender', 'blood_pressure', 'cholesterol',
+        'glucose_level', 'bmi', 'chest_pain', 'family_history_diabetes'
+    ]
+    df_new = pd.DataFrame([patient_data], columns=columns)
+
+    if os.path.exists(filename):
+        df_existing = pd.read_csv(filename)
+        df_combined = pd.concat([df_existing, df_new], ignore_index=True)
+    else:
+        df_combined = df_new
+
+    df_combined.to_csv(filename, index=False)
+    print(f"✅ Patient data saved to '{filename}'")
+
+# ======= 📊 4️⃣ Plot visualization =======
+def plot_predictions(df):
+    for index, row in df.iterrows():
+        name = row['name']
+        diabetes_prob = row['diabetes_confidence']
+        heart_prob = row['heart_disease_confidence']
+
+        diseases = ['Diabetes', 'Heart Disease']
+        probabilities = [diabetes_prob, heart_prob]
+
+        plt.figure(figsize=(6,4))
+        bars = plt.bar(diseases, probabilities, color=['skyblue', 'salmon'])
+        plt.ylim(0, 1)
+        plt.ylabel('Prediction Confidence')
+        plt.title(f'Disease Prediction Confidence for {name}')
+
+        for bar, prob in zip(bars, probabilities):
+            plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
+                     f'{prob:.2f}', ha='center', fontsize=12)
+
+        plt.show()
+
+# ======= 5️⃣ Predict diseases and visualize =======
+def predict_diseases_from_csv(input_csv='patient_input_data.csv', output_csv='patient_predictions.csv'):
+    if not os.path.exists(input_csv):
+        print(f"⚠️ Input CSV '{input_csv}' not found.")
+        return
+
+    if not os.path.exists('diabetes_model.pkl') or not os.path.exists('heart_disease_model.pkl'):
+        print("⚠️ Trained model files not found. Train the models first.")
+        return
+
+    diabetes_model = joblib.load('diabetes_model.pkl')
+    heart_model = joblib.load('heart_disease_model.pkl')
+
+    df = pd.read_csv(input_csv)
+    X = df.drop(['name'], axis=1)
+
+    pred_diabetes = diabetes_model.predict(X)
+    prob_diabetes = diabetes_model.predict_proba(X)[:, 1]
+
+    pred_heart = heart_model.predict(X)
+    prob_heart = heart_model.predict_proba(X)[:, 1]
+
+    df['diabetes_present'] = pred_diabetes
+    df['diabetes_confidence'] = np.round(prob_diabetes, 2)
+    df['heart_disease_present'] = pred_heart
+    df['heart_disease_confidence'] = np.round(prob_heart, 2)
+
+    df.to_csv(output_csv, index=False)
+    print(f"\n✅ Predictions saved to '{output_csv}'")
+
+    # Print summary table
+    print(df[['name', 'age', 'gender', 'diabetes_present', 'diabetes_confidence',
+              'heart_disease_present', 'heart_disease_confidence']])
+
+    # 📊 Plot visualization
+    plot_predictions(df)
+
+# ======= MAIN EXECUTION =======
+if __name__ == "__main__":
+    print("🚀 Generating synthetic training data...")
+    df_train = generate_synthetic_data()
+    df_train.to_csv('synthetic_patient_data.csv', index=False)
+    print("✅ Synthetic data saved as 'synthetic_patient_data.csv'")
+
+    print("\n🚀 Training disease prediction models...")
+    train_models(df_train)
+
+    # Collect patient data
+    while True:
+        patient_data = get_patient_input()
+        save_patient_data(patient_data)
+
+        cont = input("\nDo you want to add another patient? (y/n): ").lower()
+        if cont != 'y':
+            break
+
+    # Predict for all collected patients
+    print("\n🔍 Making predictions for all patients in 'patient_input_data.csv'...")
+    predict_diseases_from_csv()
